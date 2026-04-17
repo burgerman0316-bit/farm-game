@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple HTML Farm</title>
+    <style>
+        body { text-align: center; font-family: sans-serif; background: #e0f0e0; }
+        canvas { border: 4px solid #5d4037; background: #8d6e63; cursor: crosshair; margin-top: 20px; }
+        .stats { font-size: 24px; margin: 10px; color: #2e7d32; font-weight: bold; }
+        .instructions { color: #555; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Mini Farm Sim</h1>
+    <div class="stats">Money: $<span id="money">0</span></div>
+    <p class="instructions">Click empty soil to plant ($10) | Click ripe crops to harvest ($25)</p>
+    <canvas id="farmCanvas" width="400" height="400"></canvas>
+
+    <script>
+        const canvas = document.getElementById('farmCanvas');
+        const ctx = canvas.getContext('2d');
+        const moneyDisplay = document.getElementById('money');
+        
+        let money = 50; // Starting money
+        const gridSize = 4;
+        const tileSize = 100;
+        const plots = [];
+
+        // Initialize grid plots
+        for (let y = 0; y < gridSize; y++) {
+            for (let x = 0; x < gridSize; x++) {
+                plots.push({
+                    x: x * tileSize,
+                    y: y * tileSize,
+                    state: 'empty', // empty, growing, ripe
+                    growth: 0
+                });
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            moneyDisplay.innerText = money;
+
+            plots.forEach(plot => {
+                // Draw Soil
+                ctx.fillStyle = '#6d4c41';
+                ctx.fillRect(plot.x + 2, plot.y + 2, tileSize - 4, tileSize - 4);
+
+                if (plot.state === 'growing') {
+                    ctx.fillStyle = '#8bc34a'; // Light green for sprout
+                    const size = (plot.growth / 100) * 40;
+                    ctx.fillRect(plot.x + 30, plot.y + (80 - size), 40, size);
+                    plot.growth += 0.5; // Growth speed
+                    if (plot.growth >= 100) plot.state = 'ripe';
+                } 
+                else if (plot.state === 'ripe') {
+                    ctx.fillStyle = '#f44336'; // Red for ripe crop
+                    ctx.beginPath();
+                    ctx.arc(plot.x + 50, plot.y + 50, 30, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+            requestAnimationFrame(draw);
+        }
+
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            plots.forEach(plot => {
+                if (mouseX > plot.x && mouseX < plot.x + tileSize &&
+                    mouseY > plot.y && mouseY < plot.y + tileSize) {
+                    
+                    if (plot.state === 'empty' && money >= 10) {
+                        money -= 10;
+                        plot.state = 'growing';
+                        plot.growth = 0;
+                    } else if (plot.state === 'ripe') {
+                        money += 25;
+                        plot.state = 'empty';
+                    }
+                }
+            });
+        });
+
+        draw();
+    </script>
+</body>
+</html>
