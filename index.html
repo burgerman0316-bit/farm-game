@@ -2,18 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>3D Farm Web Game</title>
+    <title>3D Tractor Farm Simulator</title>
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; }
-        #ui { position: absolute; top: 10; left: 10; color: white; background: rgba(0,0,0,0.5); padding: 10px; pointer-events: none; }
-        #instructions { position: absolute; bottom: 10; left: 10; color: white; background: rgba(0,0,0,0.5); padding: 10px; }
+        body { margin: 0; overflow: hidden; background: #87CEEB; font-family: 'Segoe UI', sans-serif; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px; pointer-events: none; }
+        #controls { position: absolute; bottom: 20px; left: 20px; color: white; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px; }
+        .stat { font-size: 20px; font-weight: bold; margin-bottom: 5px; }
     </style>
 </head>
 <body>
-    <div id="ui">Seeds: <span id="seeds">10</span> | Crops: <span id="crops">0</span></div>
-    <div id="instructions">WASD to Move | SPACE to Plant/Harvest</div>
+    <div id="ui">
+        <div class="stat">🌾 Harvested: <span id="score">0</span></div>
+        <div class="stat">🚜 Speed: <span id="speed">0</span> km/h</div>
+    </div>
+    <div id="controls">WASD to Drive | Space to Brake</div>
 
-    <!-- Load Three.js from CDN -->
     <script type="importmap">
         { "imports": { "three": "https://unpkg.com" } }
     </script>
@@ -21,124 +24,148 @@
     <script type="module">
         import * as THREE from 'three';
 
-        // --- GAME STATE ---
-        const gameState = { seeds: 10, crops: 0 };
-        const plots = new Map(); // Track plants by grid coordinate "x,z"
-
         // --- SCENE SETUP ---
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87ceeb); // Sky blue
+        scene.background = new THREE.Color(0x87ceeb);
+        scene.fog = new THREE.Fog(0x87ceeb, 20, 100);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
         // --- LIGHTING ---
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-        scene.add(ambientLight);
-        const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-        sun.position.set(10, 20, 10);
+        const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambient);
+        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+        sun.position.set(50, 50, 50);
+        sun.castShadow = true;
         scene.add(sun);
 
         // --- ENVIRONMENT ---
-        // Grass Floor
-        const floorGeo = new THREE.PlaneGeometry(100, 100);
-        const floorMat = new THREE.MeshLambertMaterial({ color: 0x348C31 });
-        const floor = new THREE.Mesh(floorGeo, floorMat);
-        floor.rotation.x = -Math.PI / 2;
-        scene.add(floor);
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(200, 200),
+            new THREE.MeshStandardMaterial({ color: 0x3d7e33 })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
 
-        // Farming Grid Visual
-        const grid = new THREE.GridHelper(20, 20, 0x000000, 0x222222);
-        grid.position.y = 0.01;
-        scene.add(grid);
+        // --- THE TRACTOR (Grouped Mesh) ---
+        const tractor = new THREE.Group();
+        
+        // Main Body (Red)
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1, 2.5), new THREE.MeshStandardMaterial({ color: 0xc1272d }));
+        body.position.y = 1;
+        body.castShadow = true;
+        tractor.add(body);
 
-        // --- PLAYER ---
-        const playerGeo = new THREE.CapsuleGeometry(0.4, 1, 4, 8);
-        const playerMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
-        const player = new THREE.Mesh(playerGeo, playerMat);
-        player.position.y = 1;
-        scene.add(player);
+        // Cabin (Glass/Black)
+        const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1, 1.2), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+        cabin.position.set(0, 2, -0.4);
+        tractor.add(cabin);
 
-        // --- CONTROLS ---
+        // Chimney
+        const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+        pipe.position.set(0.5, 1.8, 0.8);
+        tractor.add(pipe);
+
+        // Wheels
+        const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16);
+        const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+        const createWheel = (x, z, s) => {
+            const w = new THREE.Mesh(wheelGeo, wheelMat);
+            w.scale.set(s, 1, s);
+            w.rotation.z = Math.PI / 2;
+            w.position.set(x, 0.5 * s, z);
+            tractor.add(w);
+        };
+        createWheel(0.9, 0.8, 0.8); // Front Right
+        createWheel(-0.9, 0.8, 0.8); // Front Left
+        createWheel(0.9, -0.8, 1.2); // Back Right
+        createWheel(-0.9, -0.8, 1.2); // Back Left
+
+        scene.add(tractor);
+
+        // --- CROPS SYSTEM ---
+        const crops = [];
+        const cropGeo = new THREE.CylinderGeometry(0.1, 0.1, 1.2);
+        const cropMat = new THREE.MeshStandardMaterial({ color: 0xffd700 });
+
+        for(let i=0; i<300; i++) {
+            const crop = new THREE.Mesh(cropGeo, cropMat);
+            crop.position.set(Math.random()*60 - 30, 0.6, Math.random()*60 - 30);
+            crop.castShadow = true;
+            scene.add(crop);
+            crops.push(crop);
+        }
+
+        // --- VEHICLE PHYSICS ---
+        let velocity = 0;
+        let rotation = 0;
         const keys = {};
+        let score = 0;
+
         window.addEventListener('keydown', (e) => keys[e.code] = true);
         window.addEventListener('keyup', (e) => keys[e.code] = false);
 
-        // --- FARMING LOGIC ---
-        function interact() {
-            const gx = Math.round(player.position.x);
-            const gz = Math.round(player.position.z);
-            const key = `${gx},${gz}`;
+        function updatePhysics() {
+            // Acceleration
+            if (keys['KeyW']) velocity += 0.005;
+            if (keys['KeyS']) velocity -= 0.005;
+            if (keys['Space']) velocity *= 0.9; // Brake
 
-            if (plots.has(key)) {
-                // Harvest if grown
-                const plant = plots.get(key);
-                if (plant.userData.grown) {
-                    scene.remove(plant);
-                    plots.delete(key);
-                    gameState.crops++;
-                    updateUI();
-                }
-            } else if (gameState.seeds > 0) {
-                // Plant
-                const plantGeo = new THREE.BoxGeometry(0.3, 0.1, 0.3);
-                const plantMat = new THREE.MeshLambertMaterial({ color: 0x567d46 });
-                const plant = new THREE.Mesh(plantGeo, plantMat);
-                plant.position.set(gx, 0.1, gz);
-                plant.userData = { age: 0, grown: false };
-                
-                scene.add(plant);
-                plots.set(key, plant);
-                gameState.seeds--;
-                updateUI();
+            // Steering
+            if (Math.abs(velocity) > 0.01) {
+                const steerDir = velocity > 0 ? 1 : -1;
+                if (keys['KeyA']) rotation += 0.03 * steerDir;
+                if (keys['KeyD']) rotation -= 0.03 * steerDir;
             }
+
+            // Friction
+            velocity *= 0.98;
+            
+            // Apply Movement
+            tractor.rotation.y = rotation;
+            tractor.translateX(0); // Dummy for local coord system
+            tractor.position.x += Math.sin(rotation) * velocity;
+            tractor.position.z += Math.cos(rotation) * velocity;
+
+            // Update UI
+            document.getElementById('speed').innerText = Math.abs(Math.round(velocity * 100));
         }
 
-        window.addEventListener('keydown', (e) => {
-            if (e.code === 'Space') interact();
-        });
-
-        function updateUI() {
-            document.getElementById('seeds').innerText = gameState.seeds;
-            document.getElementById('crops').innerText = gameState.crops;
-        }
-
-        // --- ANIMATION LOOP ---
-        function animate() {
-            requestAnimationFrame(animate);
-
-            // Movement
-            const speed = 0.1;
-            if (keys['KeyW']) player.position.z -= speed;
-            if (keys['KeyS']) player.position.z += speed;
-            if (keys['KeyA']) player.position.x -= speed;
-            if (keys['KeyD']) player.position.x += speed;
-
-            // Camera Follow
-            camera.position.set(player.position.x, player.position.y + 5, player.position.z + 5);
-            camera.lookAt(player.position);
-
-            // Growing Logic
-            plots.forEach((plant) => {
-                if (!plant.userData.grown) {
-                    plant.userData.age += 0.01;
-                    plant.scale.y = 1 + plant.userData.age * 5;
-                    plant.position.y = plant.scale.y * 0.05;
-                    if (plant.userData.age > 1) {
-                        plant.userData.grown = true;
-                        plant.material.color.set(0xffd700); // Turn gold when ready
-                    }
+        function checkHarvest() {
+            crops.forEach((crop, index) => {
+                const dist = tractor.position.distanceTo(crop.position);
+                if (dist < 1.8) {
+                    scene.remove(crop);
+                    crops.splice(index, 1);
+                    score++;
+                    document.getElementById('score').innerText = score;
                 }
             });
+        }
+
+        // --- MAIN LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            updatePhysics();
+            checkHarvest();
+
+            // Camera Follow
+            const relativeCameraOffset = new THREE.Vector3(0, 6, -12);
+            const cameraOffset = relativeCameraOffset.applyMatrix4(tractor.matrixWorld);
+            camera.position.lerp(cameraOffset, 0.1);
+            camera.lookAt(tractor.position);
 
             renderer.render(scene, camera);
         }
 
         animate();
 
-        // Handle Resize
+        // Resize Handling
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
