@@ -2,91 +2,148 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple HTML Farm</title>
+    <title>3D Farm Web Game</title>
     <style>
-        body { text-align: center; font-family: sans-serif; background: #e0f0e0; }
-        canvas { border: 4px solid #5d4037; background: #8d6e63; cursor: crosshair; margin-top: 20px; }
-        .stats { font-size: 24px; margin: 10px; color: #2e7d32; font-weight: bold; }
-        .instructions { color: #555; margin-bottom: 10px; }
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        #ui { position: absolute; top: 10; left: 10; color: white; background: rgba(0,0,0,0.5); padding: 10px; pointer-events: none; }
+        #instructions { position: absolute; bottom: 10; left: 10; color: white; background: rgba(0,0,0,0.5); padding: 10px; }
     </style>
 </head>
 <body>
-    <h1>Mini Farm Sim</h1>
-    <div class="stats">Money: $<span id="money">0</span></div>
-    <p class="instructions">Click empty soil to plant ($10) | Click ripe crops to harvest ($25)</p>
-    <canvas id="farmCanvas" width="400" height="400"></canvas>
+    <div id="ui">Seeds: <span id="seeds">10</span> | Crops: <span id="crops">0</span></div>
+    <div id="instructions">WASD to Move | SPACE to Plant/Harvest</div>
 
-    <script>
-        const canvas = document.getElementById('farmCanvas');
-        const ctx = canvas.getContext('2d');
-        const moneyDisplay = document.getElementById('money');
-        
-        let money = 50; // Starting money
-        const gridSize = 4;
-        const tileSize = 100;
-        const plots = [];
+    <!-- Load Three.js from CDN -->
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com" } }
+    </script>
 
-        // Initialize grid plots
-        for (let y = 0; y < gridSize; y++) {
-            for (let x = 0; x < gridSize; x++) {
-                plots.push({
-                    x: x * tileSize,
-                    y: y * tileSize,
-                    state: 'empty', // empty, growing, ripe
-                    growth: 0
-                });
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- GAME STATE ---
+        const gameState = { seeds: 10, crops: 0 };
+        const plots = new Map(); // Track plants by grid coordinate "x,z"
+
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb); // Sky blue
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+        sun.position.set(10, 20, 10);
+        scene.add(sun);
+
+        // --- ENVIRONMENT ---
+        // Grass Floor
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshLambertMaterial({ color: 0x348C31 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+
+        // Farming Grid Visual
+        const grid = new THREE.GridHelper(20, 20, 0x000000, 0x222222);
+        grid.position.y = 0.01;
+        scene.add(grid);
+
+        // --- PLAYER ---
+        const playerGeo = new THREE.CapsuleGeometry(0.4, 1, 4, 8);
+        const playerMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+        const player = new THREE.Mesh(playerGeo, playerMat);
+        player.position.y = 1;
+        scene.add(player);
+
+        // --- CONTROLS ---
+        const keys = {};
+        window.addEventListener('keydown', (e) => keys[e.code] = true);
+        window.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        // --- FARMING LOGIC ---
+        function interact() {
+            const gx = Math.round(player.position.x);
+            const gz = Math.round(player.position.z);
+            const key = `${gx},${gz}`;
+
+            if (plots.has(key)) {
+                // Harvest if grown
+                const plant = plots.get(key);
+                if (plant.userData.grown) {
+                    scene.remove(plant);
+                    plots.delete(key);
+                    gameState.crops++;
+                    updateUI();
+                }
+            } else if (gameState.seeds > 0) {
+                // Plant
+                const plantGeo = new THREE.BoxGeometry(0.3, 0.1, 0.3);
+                const plantMat = new THREE.MeshLambertMaterial({ color: 0x567d46 });
+                const plant = new THREE.Mesh(plantGeo, plantMat);
+                plant.position.set(gx, 0.1, gz);
+                plant.userData = { age: 0, grown: false };
+                
+                scene.add(plant);
+                plots.set(key, plant);
+                gameState.seeds--;
+                updateUI();
             }
         }
 
-        function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            moneyDisplay.innerText = money;
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') interact();
+        });
 
-            plots.forEach(plot => {
-                // Draw Soil
-                ctx.fillStyle = '#6d4c41';
-                ctx.fillRect(plot.x + 2, plot.y + 2, tileSize - 4, tileSize - 4);
-
-                if (plot.state === 'growing') {
-                    ctx.fillStyle = '#8bc34a'; // Light green for sprout
-                    const size = (plot.growth / 100) * 40;
-                    ctx.fillRect(plot.x + 30, plot.y + (80 - size), 40, size);
-                    plot.growth += 0.5; // Growth speed
-                    if (plot.growth >= 100) plot.state = 'ripe';
-                } 
-                else if (plot.state === 'ripe') {
-                    ctx.fillStyle = '#f44336'; // Red for ripe crop
-                    ctx.beginPath();
-                    ctx.arc(plot.x + 50, plot.y + 50, 30, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            });
-            requestAnimationFrame(draw);
+        function updateUI() {
+            document.getElementById('seeds').innerText = gameState.seeds;
+            document.getElementById('crops').innerText = gameState.crops;
         }
 
-        canvas.addEventListener('click', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
 
-            plots.forEach(plot => {
-                if (mouseX > plot.x && mouseX < plot.x + tileSize &&
-                    mouseY > plot.y && mouseY < plot.y + tileSize) {
-                    
-                    if (plot.state === 'empty' && money >= 10) {
-                        money -= 10;
-                        plot.state = 'growing';
-                        plot.growth = 0;
-                    } else if (plot.state === 'ripe') {
-                        money += 25;
-                        plot.state = 'empty';
+            // Movement
+            const speed = 0.1;
+            if (keys['KeyW']) player.position.z -= speed;
+            if (keys['KeyS']) player.position.z += speed;
+            if (keys['KeyA']) player.position.x -= speed;
+            if (keys['KeyD']) player.position.x += speed;
+
+            // Camera Follow
+            camera.position.set(player.position.x, player.position.y + 5, player.position.z + 5);
+            camera.lookAt(player.position);
+
+            // Growing Logic
+            plots.forEach((plant) => {
+                if (!plant.userData.grown) {
+                    plant.userData.age += 0.01;
+                    plant.scale.y = 1 + plant.userData.age * 5;
+                    plant.position.y = plant.scale.y * 0.05;
+                    if (plant.userData.age > 1) {
+                        plant.userData.grown = true;
+                        plant.material.color.set(0xffd700); // Turn gold when ready
                     }
                 }
             });
-        });
 
-        draw();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
