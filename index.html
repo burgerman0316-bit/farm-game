@@ -2,20 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>3D Tractor Farm Simulator</title>
+    <title>3D Pro Farm Simulator</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #87CEEB; font-family: 'Segoe UI', sans-serif; }
-        #ui { position: absolute; top: 20px; left: 20px; color: white; background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px; pointer-events: none; }
-        #controls { position: absolute; bottom: 20px; left: 20px; color: white; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 5px; }
-        .stat { font-size: 20px; font-weight: bold; margin-bottom: 5px; }
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #000; }
+        #ui { position: absolute; top: 20px; left: 20px; color: white; background: rgba(0,0,0,0.7); padding: 15px; border-radius: 10px; border: 2px solid #555; pointer-events: none; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; background: rgba(255,255,255,0.5); border-radius: 50%; transform: translate(-50%, -50%); }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div class="stat">🌾 Harvested: <span id="score">0</span></div>
-        <div class="stat">🚜 Speed: <span id="speed">0</span> km/h</div>
+        <h2 style="margin-top:0; color: #ffcc00;">FARMLAND SIM</h2>
+        <div>🚜 Gear: <span id="gear">N</span></div>
+        <div>🏁 Speed: <span id="speed">0</span> km/h</div>
+        <hr>
+        <small>WASD - Drive | SPACE - Handbrake | C - Camera</small>
     </div>
-    <div id="controls">WASD to Drive | Space to Brake</div>
 
     <script type="importmap">
         { "imports": { "three": "https://unpkg.com" } }
@@ -24,10 +25,10 @@
     <script type="module">
         import * as THREE from 'three';
 
-        // --- SCENE SETUP ---
+        // --- CORE SETUP ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87ceeb);
-        scene.fog = new THREE.Fog(0x87ceeb, 20, 100);
+        scene.fog = new THREE.Fog(0x87ceeb, 50, 150);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -36,136 +37,100 @@
         document.body.appendChild(renderer.domElement);
 
         // --- LIGHTING ---
-        const ambient = new THREE.AmbientLight(0xffffff, 0.7);
-        scene.add(ambient);
-        const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-        sun.position.set(50, 50, 50);
-        sun.castShadow = true;
-        scene.add(sun);
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+        scene.add(hemiLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        dirLight.position.set(50, 100, 50);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
 
-        // --- ENVIRONMENT ---
-        const ground = new THREE.Mesh(
-            new THREE.PlaneGeometry(200, 200),
-            new THREE.MeshStandardMaterial({ color: 0x3d7e33 })
-        );
+        // --- WORLD GENERATION (The Field) ---
+        const floorGeo = new THREE.PlaneGeometry(300, 300);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x2d5a27 }); // Deep grass
+        const ground = new THREE.Mesh(floorGeo, floorMat);
         ground.rotation.x = -Math.PI / 2;
         ground.receiveShadow = true;
         scene.add(ground);
 
-        // --- THE TRACTOR (Grouped Mesh) ---
+        // Add a "Plowed Field" Texture Area
+        const fieldGeo = new THREE.PlaneGeometry(50, 80);
+        const fieldMat = new THREE.MeshStandardMaterial({ color: 0x4b3621, roughness: 1 });
+        const field = new THREE.Mesh(fieldGeo, fieldMat);
+        field.rotation.x = -Math.PI / 2;
+        field.position.set(0, 0.02, 0); // Slightly above ground to avoid flickering
+        scene.add(field);
+
+        // --- DETAILED TRACTOR ---
         const tractor = new THREE.Group();
         
-        // Main Body (Red)
-        const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1, 2.5), new THREE.MeshStandardMaterial({ color: 0xc1272d }));
-        body.position.y = 1;
+        // Chassis & Hood
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2, 2.8), new THREE.MeshStandardMaterial({ color: 0x008000 })); // John Deere Green
+        body.position.y = 1.2;
         body.castShadow = true;
         tractor.add(body);
 
-        // Cabin (Glass/Black)
-        const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1, 1.2), new THREE.MeshStandardMaterial({ color: 0x333333 }));
-        cabin.position.set(0, 2, -0.4);
+        // Cabin
+        const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.4, 1.3), new THREE.MeshStandardMaterial({ color: 0x222222, transparent: true, opacity: 0.8 }));
+        cabin.position.set(0, 2.3, -0.4);
         tractor.add(cabin);
 
-        // Chimney
-        const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 1), new THREE.MeshStandardMaterial({ color: 0x111111 }));
-        pipe.position.set(0.5, 1.8, 0.8);
-        tractor.add(pipe);
-
-        // Wheels
-        const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16);
+        // Big Back Wheels
+        const bWheelGeo = new THREE.CylinderGeometry(0.8, 0.8, 0.6, 16);
         const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
-        const createWheel = (x, z, s) => {
-            const w = new THREE.Mesh(wheelGeo, wheelMat);
-            w.scale.set(s, 1, s);
-            w.rotation.z = Math.PI / 2;
-            w.position.set(x, 0.5 * s, z);
-            tractor.add(w);
-        };
-        createWheel(0.9, 0.8, 0.8); // Front Right
-        createWheel(-0.9, 0.8, 0.8); // Front Left
-        createWheel(0.9, -0.8, 1.2); // Back Right
-        createWheel(-0.9, -0.8, 1.2); // Back Left
+        const rw = new THREE.Mesh(bWheelGeo, wheelMat); rw.rotation.z = Math.PI/2; rw.position.set(1, 0.8, -0.8);
+        const lw = new THREE.Mesh(bWheelGeo, wheelMat); lw.rotation.z = Math.PI/2; lw.position.set(-1, 0.8, -0.8);
+        tractor.add(rw, lw);
+
+        // Small Front Wheels
+        const fWheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.5, 16);
+        const frw = new THREE.Mesh(fWheelGeo, wheelMat); frw.rotation.z = Math.PI/2; frw.position.set(0.8, 0.5, 1);
+        const flw = new THREE.Mesh(fWheelGeo, wheelMat); flw.rotation.z = Math.PI/2; flw.position.set(-0.8, 0.5, 1);
+        tractor.add(frw, flw);
 
         scene.add(tractor);
 
-        // --- CROPS SYSTEM ---
-        const crops = [];
-        const cropGeo = new THREE.CylinderGeometry(0.1, 0.1, 1.2);
-        const cropMat = new THREE.MeshStandardMaterial({ color: 0xffd700 });
-
-        for(let i=0; i<300; i++) {
-            const crop = new THREE.Mesh(cropGeo, cropMat);
-            crop.position.set(Math.random()*60 - 30, 0.6, Math.random()*60 - 30);
-            crop.castShadow = true;
-            scene.add(crop);
-            crops.push(crop);
-        }
-
-        // --- VEHICLE PHYSICS ---
+        // --- DRIVE PHYSICS ---
         let velocity = 0;
         let rotation = 0;
         const keys = {};
-        let score = 0;
-
         window.addEventListener('keydown', (e) => keys[e.code] = true);
         window.addEventListener('keyup', (e) => keys[e.code] = false);
 
         function updatePhysics() {
-            // Acceleration
-            if (keys['KeyW']) velocity += 0.005;
-            if (keys['KeyS']) velocity -= 0.005;
-            if (keys['Space']) velocity *= 0.9; // Brake
+            if (keys['KeyW']) velocity += 0.008;
+            if (keys['KeyS']) velocity -= 0.008;
+            if (keys['Space']) velocity *= 0.85; // Brakes
 
-            // Steering
             if (Math.abs(velocity) > 0.01) {
-                const steerDir = velocity > 0 ? 1 : -1;
-                if (keys['KeyA']) rotation += 0.03 * steerDir;
-                if (keys['KeyD']) rotation -= 0.03 * steerDir;
+                const turnFactor = velocity > 0 ? 1 : -1;
+                if (keys['KeyA']) rotation += 0.025 * turnFactor;
+                if (keys['KeyD']) rotation -= 0.025 * turnFactor;
             }
 
-            // Friction
-            velocity *= 0.98;
-            
-            // Apply Movement
+            velocity *= 0.97; // Drag
             tractor.rotation.y = rotation;
-            tractor.translateX(0); // Dummy for local coord system
             tractor.position.x += Math.sin(rotation) * velocity;
             tractor.position.z += Math.cos(rotation) * velocity;
 
-            // Update UI
-            document.getElementById('speed').innerText = Math.abs(Math.round(velocity * 100));
+            // UI Stats
+            document.getElementById('speed').innerText = Math.abs(Math.round(velocity * 120));
+            document.getElementById('gear').innerText = velocity > 0.01 ? "D" : (velocity < -0.01 ? "R" : "N");
         }
 
-        function checkHarvest() {
-            crops.forEach((crop, index) => {
-                const dist = tractor.position.distanceTo(crop.position);
-                if (dist < 1.8) {
-                    scene.remove(crop);
-                    crops.splice(index, 1);
-                    score++;
-                    document.getElementById('score').innerText = score;
-                }
-            });
-        }
-
-        // --- MAIN LOOP ---
+        // --- ANIMATION ---
         function animate() {
             requestAnimationFrame(animate);
             updatePhysics();
-            checkHarvest();
 
-            // Camera Follow
-            const relativeCameraOffset = new THREE.Vector3(0, 6, -12);
-            const cameraOffset = relativeCameraOffset.applyMatrix4(tractor.matrixWorld);
+            // Smooth Follow Camera
+            const cameraOffset = new THREE.Vector3(0, 5, -12).applyMatrix4(tractor.matrixWorld);
             camera.position.lerp(cameraOffset, 0.1);
-            camera.lookAt(tractor.position);
+            camera.lookAt(tractor.position.x, tractor.position.y + 1, tractor.position.z);
 
             renderer.render(scene, camera);
         }
-
         animate();
 
-        // Resize Handling
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
